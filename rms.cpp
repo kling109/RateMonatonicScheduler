@@ -8,9 +8,12 @@ Project: Rate Monatonic Scheduler
 */
 
 #include <iostream>
+#include <stdio.h>
 #include <chrono>
 #include <thread>
+#include <unistd.h>
 #include <pthread.h>
+#include <semaphore.h>
 
 using namespace std;
 
@@ -19,10 +22,8 @@ using namespace std;
 int* BOARD[10];
 chrono::milliseconds period(10);
 sem_t wakeupSchedule;
-int t1 = 0;
-int t2 = 0;
-int t3 = 0;
-int t4 = 0;
+int counter [4];
+int expected [4];
 
 /*
 Idling work function. Designed to promote cache misses and other small errors.
@@ -39,6 +40,34 @@ void doWork()
         product *= BOARD[k][i+(5*j)];
       }
     }
+  }
+}
+
+void* threadHandler(void* number)
+{
+  int tnum = (int)(intptr_t)number;
+  int pos;
+  switch (tnum)
+  {
+    case 1: pos = 0;
+            break;
+    case 2: pos = 1;
+            break;
+    case 4: pos = 2;
+            break;
+    case 16: pos = 3;
+             break;
+    default: cout << "Received unexpected value." << endl;
+             pos = -1;
+  }
+  while (pos != -1)
+  {
+    // Add synchronization mechanism here
+    for (int i = 0; i < tnum; ++i)
+    {
+      doWork();
+    }
+    counter[pos] += 1;
   }
 }
 
@@ -65,14 +94,34 @@ int main()
     }
     BOARD[i] = row;
   }
+  for (int i = 0; i < 4; ++i)
+  {
+    counter[i] = 0;
+    expected[i] = 0;
+  }
   pthread_t threads[NUM_THREADS];
-  int t1Expected = 0;
-  int t2Expected = 0;
-  int t3Expected = 0;
-  int t4Expected = 0;
-
-
-  std::this_thread::sleep_for(16 * period);
-
+  pthread_create(&threads[0], NULL, threadHandler, (void *)(intptr_t)1);
+  pthread_create(&threads[1], NULL, threadHandler, (void *)(intptr_t)2);
+  pthread_create(&threads[2], NULL, threadHandler, (void *)(intptr_t)4);
+  pthread_create(&threads[3], NULL, threadHandler, (void *)(intptr_t)16);
+  chrono::system_clock::time_point runtime = chrono::system_clock::now();
+  for (int i = 0; i < 10; ++i)
+  {
+    // Add synchronization mechanism here
+    for (int j = 0; j < 4; ++j)
+    {
+      if (counter[j] < expected[j])
+      {
+        cout << "Thread " << j << " missed a cycle." << endl;
+      }
+      expected[j] += 1;
+    }
+    runtime += 16 * period;
+    this_thread::sleep_until(runtime);
+  }
+  for (int i = 0; i < 4; ++i)
+  {
+    cout << "Thread " << i+1 << ": Counter " << counter[i] << endl;
+  }
   return 0;
 }
