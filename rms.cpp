@@ -21,7 +21,7 @@ using namespace std;
 
 int* BOARD[10];
 chrono::milliseconds period(10);
-sem_t wakeupSchedule;
+sem_t wakeupSchedule [4];
 int counter [4];
 int expected [4];
 
@@ -80,10 +80,13 @@ be rescheduled until the sleep of the original thread finishes.
 */
 int main()
 {
-  if (sem_init(&wakeupSchedule, 0, 0) == -1)
+  for (int i = 0; i < 4; ++i)
   {
-    cout << "The semaphore failed to initialize." << endl;
-    return 1;
+    if (sem_init(&wakeupSchedule[i], 0, 1) == -1)
+    {
+      cout << "The semaphore failed to initialize." << endl;
+      return 1;
+    }
   }
   for (int i = 0; i < 10; ++i)
   {
@@ -105,9 +108,12 @@ int main()
   pthread_create(&threads[2], NULL, threadHandler, (void *)(intptr_t)4);
   pthread_create(&threads[3], NULL, threadHandler, (void *)(intptr_t)16);
   chrono::system_clock::time_point runtime = chrono::system_clock::now();
-  for (int i = 0; i < 10; ++i)
+  for (int i = 0; i < 160; ++i)
   {
-    // Add synchronization mechanism here
+    for (int j = 0; j < 4; ++j)
+    {
+      sem_post(&wakeupSchedule[j]);
+    }
     for (int j = 0; j < 4; ++j)
     {
       if (counter[j] < expected[j])
@@ -116,7 +122,7 @@ int main()
       }
       expected[j] += 1;
     }
-    runtime += 16 * period;
+    runtime += period;
     this_thread::sleep_until(runtime);
   }
   for (int i = 0; i < 4; ++i)
