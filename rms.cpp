@@ -7,6 +7,8 @@ Last Date Modified: 29 April 2019
 Project: Rate Monatonic Scheduler
 */
 
+#define _GNU_SOURCE
+#include <sched.h>
 #include <iostream>
 #include <stdio.h>
 #include <chrono>
@@ -61,7 +63,7 @@ void* threadHandler(void* number)
   {
     case 1: pos = 0;
             break;
-    case 2: pos = 1;
+    case 10000000: pos = 1;
             break;
     case 4: pos = 2;
             break;
@@ -70,13 +72,16 @@ void* threadHandler(void* number)
     default: cout << "Received unexpected value." << endl;
              pos = -1;
   }
+  cout << "Here" << endl;
   sem_wait(&wakeupSchedule[pos]);
   while (pos != -1 && run == true)
   {
+    cout << "Running " << pos << endl;
     for (int i = 0; i < tnum; ++i)
     {
       doWork();
     }
+    cout << "Finished " << pos << endl;
     pthread_mutex_lock(&lock[pos]);
     counter[pos] += 1;
     pthread_mutex_unlock(&lock[pos]);
@@ -137,7 +142,7 @@ int main()
 
   // Set priority for main thread
   struct sched_param mainParams;
-  mainParams.sched_priority = 98;
+  mainParams.sched_priority = sched_get_priority_max(SCHED_FIFO) - 1;
   pthread_setschedparam(pthread_self(), SCHED_FIFO, &mainParams);
 
   // Set priorities for each thread
@@ -148,36 +153,33 @@ int main()
   {
     pthread_attr_init(&threadAttributes[i]);
     pthread_attr_setinheritsched(&threadAttributes[i], PTHREAD_EXPLICIT_SCHED);
-    threadParams[i].sched_priority = 80 - 10*i;
+    pthread_attr_setschedpolicy(&threadAttributes[i], SCHED_OTHER);
+    threadParams[i].sched_priority = sched_get_priority_max(SCHED_OTHER) - 1*i - 2;
+    pthread_attr_setschedparam(&threadAttributes[i], &threadParams[i]);
   }
 
   // Initialize threads
   pthread_create(&threads[0], &threadAttributes[0], threadHandler, (void *)(intptr_t)1);
-  pthread_create(&threads[1], &threadAttributes[1], threadHandler, (void *)(intptr_t)2);
+  pthread_create(&threads[1], &threadAttributes[1], threadHandler, (void *)(intptr_t)10000000);
   pthread_create(&threads[2], &threadAttributes[2], threadHandler, (void *)(intptr_t)4);
   pthread_create(&threads[3], &threadAttributes[3], threadHandler, (void *)(intptr_t)16);
-
-  for (int i = 0; i < 4; ++i)
-  {
-    pthread_setschedparam(threads[i], SCHED_FIFO, &threadParams[i]);
-  }
 
   // Set processor affinity
   cpu_set_t cpu;
   CPU_ZERO(&cpu);
-  CPU_SET(0, &cpu);
+  CPU_SET(2, &cpu);
   pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpu);
-  pthread_setaffinity_np(threads[0], sizeof(cpu_set_t), &cpu);
-  pthread_setaffinity_np(threads[1], sizeof(cpu_set_t), &cpu);
-  pthread_setaffinity_np(threads[2], sizeof(cpu_set_t), &cpu);
-  pthread_setaffinity_np(threads[3], sizeof(cpu_set_t), &cpu);
+  for (int i = 0; i < 4; ++i)
+  {
+    pthread_setaffinity_np(threads[i], sizeof(cpu_set_t), &cpu);
+  }
 
   // Initialize timer to call the given function on this thread each time it expires
   pthread_attr_t attributes;
   pthread_attr_init(&attributes);
 
   struct sched_param parameters;
-  parameters.sched_priority = 99;
+  parameters.sched_priority = sched_get_priority_max(SCHED_FIFO);
   pthread_attr_setschedpolicy(&attributes, SCHED_FIFO);
   pthread_attr_setschedparam(&attributes, &parameters);
 
@@ -248,6 +250,20 @@ int main()
       expected[3] += 1;
     }
     sem_wait(&schedule);
+  }
+
+  for (int i = 0; i < 4; ++i)
+  {
+    cpu_set_t cput;
+    CPU_ZERO(&cput);
+    pthread_getaffinity_np(threads[i], sizeof(cpu_set_t), &cput);
+    for (int j = 0; j < sysconf(_SC_NPROCESSORS_ONLN); ++j)
+    {
+      if (CPU_ISSET(j, &cput))
+      {
+        cout << "Thread " << i << " ran on CPU " << j << endl;
+      }
+    }
   }
 
   // Closes out all timing mechanisms and merges the threads back into the parent.
