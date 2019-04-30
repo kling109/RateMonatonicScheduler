@@ -23,7 +23,7 @@ The scheduler itself is managed by a CPU timer, which also controls a semaphore 
 
 ## Known Issues
 
-Never actually allows the lower-priority threads to run when set to priority FIFO.
+None
 
 ## Sources
 
