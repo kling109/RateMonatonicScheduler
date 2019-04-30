@@ -3,7 +3,7 @@ Name: Trevor Kling
 ID: 002270716
 Email: kling109@mail.chapman.edu
 Course: CPSC 380 Operating Systems
-Last Date Modified: 22 April 2019
+Last Date Modified: 29 April 2019
 Project: Rate Monatonic Scheduler
 */
 
@@ -14,14 +14,20 @@ Project: Rate Monatonic Scheduler
 #include <unistd.h>
 #include <pthread.h>
 #include <semaphore.h>
+#include <time.h>
+#include <signal.h>
+#include <errno.h>
 
 using namespace std;
 
 #define NUM_THREADS 4
 
 int* BOARD[10];
-chrono::milliseconds period(10);
+int RUNTIME = 160;
+bool run = true;
+sem_t schedule;
 sem_t wakeupSchedule [4];
+pthread_mutex_t lock [4];
 int counter [4];
 int expected [4];
 
@@ -43,6 +49,10 @@ void doWork()
   }
 }
 
+/*
+Handles the threads.  Allows the scheduler to tell the thread when to run its
+work, and is general enough to be given to all threads being run.
+*/
 void* threadHandler(void* number)
 {
   int tnum = (int)(intptr_t)number;
@@ -60,15 +70,26 @@ void* threadHandler(void* number)
     default: cout << "Received unexpected value." << endl;
              pos = -1;
   }
-  while (pos != -1)
+  sem_wait(&wakeupSchedule[pos]);
+  while (pos != -1 && run == true)
   {
-    // Add synchronization mechanism here
     for (int i = 0; i < tnum; ++i)
     {
       doWork();
     }
+    pthread_mutex_lock(&lock[pos]);
     counter[pos] += 1;
+    pthread_mutex_unlock(&lock[pos]);
+    sem_wait(&wakeupSchedule[pos]);
   }
+}
+
+/*
+Signaling function for the timer.  Allows the scheduler to "wake up" every time the timer elapses.
+*/
+void sigfunc(union sigval val)
+{
+  sem_post(&schedule);
 }
 
 /*
@@ -80,14 +101,25 @@ be rescheduled until the sleep of the original thread finishes.
 */
 int main()
 {
+  if (sem_init(&schedule, 0, 0) == -1)
+  {
+    cout << "The semaphore failed to initialize." << endl;
+    return 1;
+  }
   for (int i = 0; i < 4; ++i)
   {
-    if (sem_init(&wakeupSchedule[i], 0, 1) == -1)
+    if (sem_init(&wakeupSchedule[i], 0, 0) == -1)
     {
       cout << "The semaphore failed to initialize." << endl;
       return 1;
     }
+    if (pthread_mutex_init(&lock[i], NULL) != 0)
+    {
+      cout << "The mutex failed to initialize." << endl;
+      return 1;
+    }
   }
+
   for (int i = 0; i < 10; ++i)
   {
     int* row = new int[10];
@@ -102,32 +134,146 @@ int main()
     counter[i] = 0;
     expected[i] = 0;
   }
+
+  // Set priority for main thread
+  struct sched_param mainParams;
+  mainParams.sched_priority = 98;
+  pthread_setschedparam(pthread_self(), SCHED_FIFO, &mainParams);
+
+  // Set priorities for each thread
   pthread_t threads[NUM_THREADS];
-  pthread_create(&threads[0], NULL, threadHandler, (void *)(intptr_t)1);
-  pthread_create(&threads[1], NULL, threadHandler, (void *)(intptr_t)2);
-  pthread_create(&threads[2], NULL, threadHandler, (void *)(intptr_t)4);
-  pthread_create(&threads[3], NULL, threadHandler, (void *)(intptr_t)16);
-  chrono::system_clock::time_point runtime = chrono::system_clock::now();
-  for (int i = 0; i < 160; ++i)
+  struct sched_param threadParams[4];
+  pthread_attr_t threadAttributes[4];
+  for (int i = 0; i < 4; ++i)
   {
-    for (int j = 0; j < 4; ++j)
-    {
-      sem_post(&wakeupSchedule[j]);
-    }
-    for (int j = 0; j < 4; ++j)
-    {
-      if (counter[j] < expected[j])
-      {
-        cout << "Thread " << j << " missed a cycle." << endl;
-      }
-      expected[j] += 1;
-    }
-    runtime += period;
-    this_thread::sleep_until(runtime);
+    pthread_attr_init(&threadAttributes[i]);
+    pthread_attr_setinheritsched(&threadAttributes[i], PTHREAD_EXPLICIT_SCHED);
+    threadParams[i].sched_priority = 80 - 10*i;
   }
+
+  // Initialize threads
+  pthread_create(&threads[0], &threadAttributes[0], threadHandler, (void *)(intptr_t)1);
+  pthread_create(&threads[1], &threadAttributes[1], threadHandler, (void *)(intptr_t)2);
+  pthread_create(&threads[2], &threadAttributes[2], threadHandler, (void *)(intptr_t)4);
+  pthread_create(&threads[3], &threadAttributes[3], threadHandler, (void *)(intptr_t)16);
+
+  for (int i = 0; i < 4; ++i)
+  {
+    pthread_setschedparam(threads[i], SCHED_FIFO, &threadParams[i]);
+  }
+
+  // Set processor affinity
+  cpu_set_t cpu;
+  CPU_ZERO(&cpu);
+  CPU_SET(0, &cpu);
+  pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpu);
+  pthread_setaffinity_np(threads[0], sizeof(cpu_set_t), &cpu);
+  pthread_setaffinity_np(threads[1], sizeof(cpu_set_t), &cpu);
+  pthread_setaffinity_np(threads[2], sizeof(cpu_set_t), &cpu);
+  pthread_setaffinity_np(threads[3], sizeof(cpu_set_t), &cpu);
+
+  // Initialize timer to call the given function on this thread each time it expires
+  pthread_attr_t attributes;
+  pthread_attr_init(&attributes);
+
+  struct sched_param parameters;
+  parameters.sched_priority = 99;
+  pthread_attr_setschedpolicy(&attributes, SCHED_FIFO);
+  pthread_attr_setschedparam(&attributes, &parameters);
+
+  struct sigevent sig;
+  sig.sigev_notify = SIGEV_THREAD;
+  sig.sigev_notify_function = sigfunc;
+  sig.sigev_value.sival_int = 0;
+  sig.sigev_notify_attributes = &attributes;
+
+  timer_t timerid;
+  if (timer_create(CLOCK_REALTIME, &sig, &timerid) != 0)
+  {
+    cout << "The timer failed to initialize." << endl;
+    return 1;
+  }
+
+  // Initialize the timer values; the starting time will last 10 milliseocnds once started, then the
+  // timer will invoke the "sigfunc" method every 10 milliseconds until it is destroyed.
+  struct itimerspec start, end;
+  start.it_value.tv_sec = 0;
+  start.it_value.tv_nsec = 10000000;
+  start.it_interval.tv_sec = 0;
+  start.it_interval.tv_nsec = 10000000;
+
+  // Handles scheduling the threads
+  timer_settime(timerid, 0, &start, &end);
+  for (int i = 0; i < RUNTIME; ++i)
+  {
+    sem_post(&wakeupSchedule[0]);
+    pthread_mutex_lock(&lock[0]);
+    if (counter[0] < expected[0])
+    {
+      cout << "Thread " << 0 << " missed a cycle." << endl;
+    }
+    pthread_mutex_unlock(&lock[0]);
+    expected[0] += 1;
+    if (i % 2 == 0)
+    {
+      sem_post(&wakeupSchedule[1]);
+      pthread_mutex_lock(&lock[1]);
+      if (counter[1] < expected[1])
+      {
+        cout << "Thread " << 1 << " missed a cycle." << endl;
+      }
+      pthread_mutex_unlock(&lock[1]);
+      expected[1] += 1;
+    }
+    if (i % 4 == 0)
+    {
+      sem_post(&wakeupSchedule[2]);
+      pthread_mutex_lock(&lock[2]);
+      if (counter[2] < expected[2])
+      {
+        cout << "Thread " << 2 << " missed a cycle." << endl;
+      }
+      pthread_mutex_unlock(&lock[2]);
+      expected[2] += 1;
+    }
+    if (i % 16 == 0)
+    {
+      sem_post(&wakeupSchedule[3]);
+      pthread_mutex_lock(&lock[3]);
+      if (counter[3] < expected[3])
+      {
+        cout << "Thread " << 3 << " missed a cycle." << endl;
+      }
+      pthread_mutex_unlock(&lock[3]);
+      expected[3] += 1;
+    }
+    sem_wait(&schedule);
+  }
+
+  // Closes out all timing mechanisms and merges the threads back into the parent.
+  run = false;
+  for (int i = 0; i < 4; ++i)
+  {
+    sem_post(&wakeupSchedule[i]);
+  }
+  timer_delete(timerid);
+  pthread_attr_destroy(&attributes);
+  pthread_join(threads[0], NULL);
+  pthread_join(threads[1], NULL);
+  pthread_join(threads[2], NULL);
+  pthread_join(threads[3], NULL);
+  sem_destroy(&schedule);
+  for (int i = 0; i < 4; ++i)
+  {
+    sem_destroy(&wakeupSchedule[i]);
+    pthread_mutex_destroy(&lock[i]);
+    pthread_attr_destroy(&threadAttributes[i]);
+  }
+
   for (int i = 0; i < 4; ++i)
   {
     cout << "Thread " << i+1 << ": Counter " << counter[i] << endl;
   }
+
   return 0;
 }
