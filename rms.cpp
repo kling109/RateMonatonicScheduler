@@ -63,7 +63,7 @@ void* threadHandler(void* number)
   {
     case 1: pos = 0;
             break;
-    case 10000000: pos = 1;
+    case 1000000: pos = 1;
             break;
     case 4: pos = 2;
             break;
@@ -76,12 +76,10 @@ void* threadHandler(void* number)
   sem_wait(&wakeupSchedule[pos]);
   while (pos != -1 && run == true)
   {
-    cout << "Running " << pos << endl;
     for (int i = 0; i < tnum; ++i)
     {
       doWork();
     }
-    cout << "Finished " << pos << endl;
     pthread_mutex_lock(&lock[pos]);
     counter[pos] += 1;
     pthread_mutex_unlock(&lock[pos]);
@@ -124,7 +122,6 @@ int main()
       return 1;
     }
   }
-
   for (int i = 0; i < 10; ++i)
   {
     int* row = new int[10];
@@ -142,44 +139,83 @@ int main()
 
   // Set priority for main thread
   struct sched_param mainParams;
-  mainParams.sched_priority = sched_get_priority_max(SCHED_FIFO) - 1;
-  pthread_setschedparam(pthread_self(), SCHED_FIFO, &mainParams);
+  //mainParams.sched_priority = sched_get_priority_max(SCHED_FIFO) - 2;
+  //pthread_setschedparam(pthread_self(), SCHED_FIFO, &mainParams);
 
   // Set priorities for each thread
   pthread_t threads[NUM_THREADS];
   struct sched_param threadParams[4];
   pthread_attr_t threadAttributes[4];
+  int err;
+  int policy;
+  int prio;
   for (int i = 0; i < 4; ++i)
   {
     pthread_attr_init(&threadAttributes[i]);
-    pthread_attr_setinheritsched(&threadAttributes[i], PTHREAD_EXPLICIT_SCHED);
-    pthread_attr_setschedpolicy(&threadAttributes[i], SCHED_OTHER);
-    threadParams[i].sched_priority = sched_get_priority_max(SCHED_OTHER) - 1*i - 2;
-    pthread_attr_setschedparam(&threadAttributes[i], &threadParams[i]);
+    pthread_attr_getschedpolicy(&threadAttributes[i], &policy);
+    if (policy == SCHED_FIFO)
+    {
+      cout << "Properly set thread " << i << " to FIFO" << endl;
+    }
+    else
+    {
+      cout << "Thread " << i << " policy not set to FIFO" << endl;
+    }
+    pthread_attr_setschedpolicy(&threadAttributes[i], SCHED_FIFO);
+    pthread_attr_getschedpolicy(&threadAttributes[i], &policy);
+    if (policy == SCHED_FIFO)
+    {
+      cout << "Properly set thread " << i << " to FIFO" << endl;
+    }
+    else
+    {
+      cout << "Thread " << i << " policy not set to FIFO" << endl;
+    }
+    pthread_attr_getschedparam(&threadAttributes[i], &threadParams[i]);
+    threadParams[i].sched_priority = sched_get_priority_max(SCHED_FIFO) - 1*i - 3;
+    err = pthread_attr_setschedparam(&threadAttributes[i], &threadParams[i]);
+    //pthread_attr_setinheritsched(&threadAttributes[i], PTHREAD_EXPLICIT_SCHED);
+    if (err == EINVAL)
+    {
+      cout << "Invalid priority for a thread." << endl;
+      return 1;
+    }
+    else if (err == EPERM)
+    {
+      cout << "Insufficient permissions to set priority." << endl;
+      return 1;
+    }
+    else
+    {
+      prio = threadParams[i].sched_priority;
+      cout << "Priority of thread " << i << " set to " << prio << endl;
+      pthread_attr_getschedparam(&threadAttributes[i], &threadParams[i]);
+    }
   }
-
-  // Initialize threads
-  pthread_create(&threads[0], &threadAttributes[0], threadHandler, (void *)(intptr_t)1);
-  pthread_create(&threads[1], &threadAttributes[1], threadHandler, (void *)(intptr_t)10000000);
-  pthread_create(&threads[2], &threadAttributes[2], threadHandler, (void *)(intptr_t)4);
-  pthread_create(&threads[3], &threadAttributes[3], threadHandler, (void *)(intptr_t)16);
 
   // Set processor affinity
   cpu_set_t cpu;
   CPU_ZERO(&cpu);
   CPU_SET(2, &cpu);
-  pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpu);
+  //pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpu);
   for (int i = 0; i < 4; ++i)
   {
-    pthread_setaffinity_np(threads[i], sizeof(cpu_set_t), &cpu);
+    pthread_attr_setaffinity_np(&threadAttributes[i], sizeof(cpu_set_t), &cpu);
   }
 
+  // Initialize threads
+  pthread_create(&threads[0], &threadAttributes[0], threadHandler, (void *)(intptr_t)1);
+  pthread_create(&threads[1], &threadAttributes[1], threadHandler, (void *)(intptr_t)1000000);
+  pthread_create(&threads[2], &threadAttributes[2], threadHandler, (void *)(intptr_t)4);
+  pthread_create(&threads[3], &threadAttributes[3], threadHandler, (void *)(intptr_t)16);
+
   // Initialize timer to call the given function on this thread each time it expires
+
   pthread_attr_t attributes;
   pthread_attr_init(&attributes);
 
   struct sched_param parameters;
-  parameters.sched_priority = sched_get_priority_max(SCHED_FIFO);
+  parameters.sched_priority = sched_get_priority_max(SCHED_FIFO) - 1;
   pthread_attr_setschedpolicy(&attributes, SCHED_FIFO);
   pthread_attr_setschedparam(&attributes, &parameters);
 
@@ -198,6 +234,7 @@ int main()
 
   // Initialize the timer values; the starting time will last 10 milliseocnds once started, then the
   // timer will invoke the "sigfunc" method every 10 milliseconds until it is destroyed.
+
   struct itimerspec start, end;
   start.it_value.tv_sec = 0;
   start.it_value.tv_nsec = 10000000;
@@ -206,13 +243,14 @@ int main()
 
   // Handles scheduling the threads
   timer_settime(timerid, 0, &start, &end);
+
   for (int i = 0; i < RUNTIME; ++i)
   {
     sem_post(&wakeupSchedule[0]);
     pthread_mutex_lock(&lock[0]);
     if (counter[0] < expected[0])
     {
-      cout << "Thread " << 0 << " missed a cycle." << endl;
+      //cout << "Thread " << 0 << " missed a cycle." << endl;
     }
     pthread_mutex_unlock(&lock[0]);
     expected[0] += 1;
@@ -222,7 +260,7 @@ int main()
       pthread_mutex_lock(&lock[1]);
       if (counter[1] < expected[1])
       {
-        cout << "Thread " << 1 << " missed a cycle." << endl;
+        //cout << "Thread " << 1 << " missed a cycle." << endl;
       }
       pthread_mutex_unlock(&lock[1]);
       expected[1] += 1;
@@ -233,7 +271,7 @@ int main()
       pthread_mutex_lock(&lock[2]);
       if (counter[2] < expected[2])
       {
-        cout << "Thread " << 2 << " missed a cycle." << endl;
+        //cout << "Thread " << 2 << " missed a cycle." << endl;
       }
       pthread_mutex_unlock(&lock[2]);
       expected[2] += 1;
@@ -244,7 +282,7 @@ int main()
       pthread_mutex_lock(&lock[3]);
       if (counter[3] < expected[3])
       {
-        cout << "Thread " << 3 << " missed a cycle." << endl;
+        //cout << "Thread " << 3 << " missed a cycle." << endl;
       }
       pthread_mutex_unlock(&lock[3]);
       expected[3] += 1;
