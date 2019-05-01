@@ -1,0 +1,37 @@
+Test Cases for Rate-Monatonic Scheduler
+
+
+Test Case: Nominal Case with no overruns
+
+Thread 1: Counter 160
+Thread 1 missed its deadline 0 times.
+Thread 2: Counter 80
+Thread 2 missed its deadline 0 times.
+Thread 3: Counter 40
+Thread 3 missed its deadline 0 times.
+Thread 4: Counter 10
+Thread 4 missed its deadline 0 times.
+
+
+Test Case: Major overrun in Thread 2 (DoWork set to 200000)
+
+Thread 1: Counter 160
+Thread 1 missed its deadline 0 times.
+Thread 2: Counter 47
+Thread 2 missed its deadline 80 times.
+Thread 3: Counter 0
+Thread 3 missed its deadline 40 times.
+Thread 4: Counter 0
+Thread 4 missed its deadline 10 times.
+
+
+Test Case: Major overrun in Thread 3 (DoWork set to 400000)
+
+Thread 1: Counter 160
+Thread 1 missed its deadline 0 times.
+Thread 2: Counter 80
+Thread 2 missed its deadline 0 times.
+Thread 3: Counter 24
+Thread 3 missed its deadline 40 times.
+Thread 4: Counter 0
+Thread 4 missed its deadline 10 times.

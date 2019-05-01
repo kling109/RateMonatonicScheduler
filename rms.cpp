@@ -3,7 +3,7 @@ Name: Trevor Kling
 ID: 002270716
 Email: kling109@mail.chapman.edu
 Course: CPSC 380 Operating Systems
-Last Date Modified: 29 April 2019
+Last Date Modified: 1 May 2019
 Project: Rate Monatonic Scheduler
 */
 
@@ -23,6 +23,8 @@ Project: Rate Monatonic Scheduler
 using namespace std;
 
 #define NUM_THREADS 4
+#define THREAD_2_RUNS 2
+#define THREAD_3_RUNS 400000
 
 int* BOARD[10];
 int RUNTIME = 160;
@@ -63,16 +65,15 @@ void* threadHandler(void* number)
   {
     case 1: pos = 0;
             break;
-    case 1000000: pos = 1;
+    case THREAD_2_RUNS: pos = 1;
             break;
-    case 4: pos = 2;
+    case THREAD_3_RUNS: pos = 2;
             break;
     case 16: pos = 3;
              break;
     default: cout << "Received unexpected value." << endl;
              pos = -1;
   }
-  cout << "Here" << endl;
   sem_wait(&wakeupSchedule[pos]);
   while (pos != -1 && run == true)
   {
@@ -104,6 +105,15 @@ be rescheduled until the sleep of the original thread finishes.
 */
 int main()
 {
+  pthread_mutexattr_t priorityProtection;
+  int protocol;
+  pthread_mutexattr_init(&priorityProtection);
+  pthread_mutexattr_getprotocol(&priorityProtection, &protocol);
+  if (protocol != PTHREAD_PRIO_INHERIT)
+  {
+    pthread_mutexattr_setprotocol(&priorityProtection, PTHREAD_PRIO_INHERIT);
+  }
+
   if (sem_init(&schedule, 0, 0) == -1)
   {
     cout << "The semaphore failed to initialize." << endl;
@@ -116,12 +126,13 @@ int main()
       cout << "The semaphore failed to initialize." << endl;
       return 1;
     }
-    if (pthread_mutex_init(&lock[i], NULL) != 0)
+    if (pthread_mutex_init(&lock[i], &priorityProtection) != 0)
     {
       cout << "The mutex failed to initialize." << endl;
       return 1;
     }
   }
+
   for (int i = 0; i < 10; ++i)
   {
     int* row = new int[10];
@@ -137,18 +148,16 @@ int main()
     expected[i] = 0;
   }
 
-  // Error is that main thread is not being set to use priority
-
   // Set priority for main thread
   pthread_t mainID = pthread_self();
-  struct sched_param mainParamst;
+  struct sched_param mainParams, mainParamst;
   int mainPolicy = 0;
-  struct sched_param mainParams;
   pthread_getschedparam(pthread_self(), &mainPolicy, &mainParams);
   mainParams.sched_priority = sched_get_priority_max(SCHED_FIFO) - 2;
   pthread_setschedparam(pthread_self(), SCHED_FIFO, &mainParams);
-  //pthread_setschedprio(pthread_self(), sched_get_priority_max(SCHED_FIFO) - 2);
+  pthread_setschedprio(pthread_self(), sched_get_priority_max(SCHED_FIFO) - 2);
 
+  // Ensures main thread values were set correctly
   int mainErr = pthread_getschedparam(pthread_self(), &mainPolicy, &mainParamst);
   if (mainErr != 0)
   {
@@ -158,8 +167,13 @@ int main()
   if (mainPolicy != SCHED_FIFO)
   {
     cout << "Scheduling is not set to FIFO." << endl;
+    return 1;
   }
-  cout << "Main thread priority set to " << mainParamst.sched_priority << endl;
+  if (mainParamst.sched_priority != sched_get_priority_max(SCHED_FIFO) - 2)
+  {
+    cout << "Setting scheduler priority failed." << endl;
+    return 1;
+  }
 
   // Set priorities for each thread
   pthread_t threads[NUM_THREADS];
@@ -173,14 +187,6 @@ int main()
   {
     pthread_attr_init(&threadAttributes[i]);
     pthread_attr_getschedpolicy(&threadAttributes[i], &policy);
-    if (policy == SCHED_FIFO)
-    {
-      cout << "Properly set thread " << i << " to FIFO" << endl;
-    }
-    else
-    {
-      cout << "Thread " << i << " policy not set to FIFO" << endl;
-    }
     pthread_attr_setschedpolicy(&threadAttributes[i], SCHED_FIFO);
     threadParams[i].sched_priority = sched_get_priority_max(SCHED_FIFO) - 10*i - 3;
     err = pthread_attr_setschedparam(&threadAttributes[i], &threadParams[i]);
@@ -190,10 +196,6 @@ int main()
     {
       cout << "Failed to disable inheritance." << endl;
       return 1;
-    }
-    else
-    {
-      cout << "Inheritance disabled." << endl;
     }
     if (err == EINVAL)
     {
@@ -209,7 +211,11 @@ int main()
     {
       pthread_attr_getschedparam(&threadAttributes[i], &threadParams[i]);
       prio = threadParams[i].sched_priority;
-      cout << "Priority of thread " << i << " set to " << prio << endl;
+      if (prio != sched_get_priority_max(SCHED_FIFO) - 10*i - 3)
+      {
+        cout << "Setting the priority of thread " << i << " failed." << endl;
+        return 1;
+      }
     }
   }
 
@@ -218,49 +224,22 @@ int main()
   CPU_ZERO(&cpu[0]);
   CPU_SET(0, &cpu[0]);
   pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpu[0]);
-  for (int i = 0; i < 4; ++i)
+  for (int i = 1; i < 5; ++i)
   {
-    CPU_ZERO(&cpu[i+1]);
-    CPU_SET(3, &cpu[i+1]);
-    pthread_attr_setaffinity_np(&threadAttributes[i], sizeof(cpu_set_t), &cpu[i+1]);
+    CPU_ZERO(&cpu[i]);
+    CPU_SET(0, &cpu[i]);
+    pthread_attr_setaffinity_np(&threadAttributes[i], sizeof(cpu_set_t), &cpu[i]);
   }
 
   // Initialize threads
   pthread_create(&threads[0], &threadAttributes[0], threadHandler, (void *)(intptr_t)1);
-  pthread_create(&threads[1], &threadAttributes[1], threadHandler, (void *)(intptr_t)1000000);
-  pthread_create(&threads[2], &threadAttributes[2], threadHandler, (void *)(intptr_t)4);
+  pthread_create(&threads[1], &threadAttributes[1], threadHandler, (void *)(intptr_t)THREAD_2_RUNS);
+  pthread_create(&threads[2], &threadAttributes[2], threadHandler, (void *)(intptr_t)THREAD_3_RUNS);
   pthread_create(&threads[3], &threadAttributes[3], threadHandler, (void *)(intptr_t)16);
 
-  struct sched_param threadParamst;
-  int threadPolicy;
-  for (int i = 0; i < 4; ++i)
-  {
-    pthread_getschedparam(threads[i], &threadPolicy, &threadParamst);
-    if (threadPolicy == SCHED_FIFO)
-    {
-      cout << "Properly set thread " << i << " to FIFO" << endl;
-    }
-    else
-    {
-      cout << "Thread " << i << " policy not set to FIFO" << endl;
-    }
-    cout << "Thread priority set to " << threadParamst.sched_priority << endl;
-  }
-  /*
-  for (int i = 0; i < 4; ++i)
-  {
-    CPU_ZERO(&cpu[i+1]);
-    CPU_SET(3, &cpu[i+1]);
-    pthread_setschedparam(threads[i], SCHED_FIFO, &mainParams);
-    pthread_setschedprio(threads[i], sched_get_priority_max(SCHED_FIFO) - 5 + i);
-    pthread_setaffinity_np(threads[i], sizeof(cpu_set_t), &cpu[i+1]);
-  }
-  */
-
   // Initialize timer to call the given function on this thread each time it expires
-
-  pthread_attr_t attributes;
-  pthread_attr_init(&attributes);
+  pthread_attr_t clockAttr;
+  pthread_attr_init(&clockAttr);
 
   cpu_set_t cpuClock;
   CPU_ZERO(&cpuClock);
@@ -268,15 +247,15 @@ int main()
 
   struct sched_param parameters;
   parameters.sched_priority = sched_get_priority_max(SCHED_FIFO) - 1;
-  pthread_attr_setschedparam(&attributes, &parameters);
-  pthread_attr_setinheritsched(&attributes, PTHREAD_EXPLICIT_SCHED);
-  pthread_attr_setaffinity_np(&attributes, sizeof(cpu_set_t), &cpuClock);
+  pthread_attr_setschedparam(&clockAttr, &parameters);
+  pthread_attr_setinheritsched(&clockAttr, PTHREAD_EXPLICIT_SCHED);
+  pthread_attr_setaffinity_np(&clockAttr, sizeof(cpu_set_t), &cpuClock);
 
   struct sigevent sig;
   sig.sigev_notify = SIGEV_THREAD;
   sig.sigev_notify_function = sigfunc;
   sig.sigev_value.sival_int = 0;
-  sig.sigev_notify_attributes = &attributes;
+  sig.sigev_notify_attributes = &clockAttr;
 
   timer_t timerid;
   if (timer_create(CLOCK_REALTIME, &sig, &timerid) != 0)
@@ -294,17 +273,17 @@ int main()
   start.it_interval.tv_sec = 0;
   start.it_interval.tv_nsec = 10000000;
 
+  int deadline[4] = {0, 0, 0, 0};
   // Handles scheduling the threads
   timer_settime(timerid, 0, &start, &end);
 
   for (int i = 0; i < RUNTIME; ++i)
   {
-    //cout << "Iteration " << i << endl;
     sem_post(&wakeupSchedule[0]);
     pthread_mutex_lock(&lock[0]);
     if (counter[0] < expected[0])
     {
-      //cout << "Thread " << 0 << " missed a cycle." << endl;
+      ++deadline[0];
     }
     pthread_mutex_unlock(&lock[0]);
     expected[0] += 1;
@@ -314,7 +293,7 @@ int main()
       pthread_mutex_lock(&lock[1]);
       if (counter[1] < expected[1])
       {
-        //cout << "Thread " << 1 << " missed a cycle." << endl;
+        ++deadline[1];
       }
       pthread_mutex_unlock(&lock[1]);
       expected[1] += 1;
@@ -325,7 +304,7 @@ int main()
       pthread_mutex_lock(&lock[2]);
       if (counter[2] < expected[2])
       {
-        //cout << "Thread " << 2 << " missed a cycle." << endl;
+        ++deadline[2];
       }
       pthread_mutex_unlock(&lock[2]);
       expected[2] += 1;
@@ -336,16 +315,16 @@ int main()
       pthread_mutex_lock(&lock[3]);
       if (counter[3] < expected[3])
       {
-        //cout << "Thread " << 3 << " missed a cycle." << endl;
+        ++deadline[3];
       }
       pthread_mutex_unlock(&lock[3]);
       expected[3] += 1;
     }
-    //cout << "Waiting..." << endl;
     sem_wait(&schedule);
-    //cout << "Wait complete." << endl;
   }
 
+  // Method that can be used to test for cpu affinity being set properly
+  /*
   for (int i = 0; i < 4; ++i)
   {
     cpu_set_t cput;
@@ -359,15 +338,22 @@ int main()
       }
     }
   }
+  */
 
   // Closes out all timing mechanisms and merges the threads back into the parent.
   run = false;
   for (int i = 0; i < 4; ++i)
   {
+    pthread_mutex_lock(&lock[i]);
+    if (counter[i] < expected[i])
+    {
+      ++deadline[i];
+    }
+    pthread_mutex_unlock(&lock[i]);
     sem_post(&wakeupSchedule[i]);
   }
   timer_delete(timerid);
-  pthread_attr_destroy(&attributes);
+  pthread_attr_destroy(&clockAttr);
   pthread_join(threads[0], NULL);
   pthread_join(threads[1], NULL);
   pthread_join(threads[2], NULL);
@@ -379,10 +365,11 @@ int main()
     pthread_mutex_destroy(&lock[i]);
     pthread_attr_destroy(&threadAttributes[i]);
   }
-
+  // Display results
   for (int i = 0; i < 4; ++i)
   {
     cout << "Thread " << i+1 << ": Counter " << counter[i] << endl;
+    cout << "Thread " << i+1 << " missed its deadline " << deadline[i] << " times." << endl;
   }
 
   return 0;
