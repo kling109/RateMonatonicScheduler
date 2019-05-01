@@ -4,7 +4,7 @@ ID: 002270716
 Email: kling109@mail.chapman.edu
 Course: CPSC 380 Operating Systems
 Last Date Modified: 1 May 2019
-Project: Rate Monatonic Scheduler
+Project: Rate Monotonic Scheduler
 */
 
 #define _GNU_SOURCE
@@ -24,7 +24,7 @@ using namespace std;
 
 #define NUM_THREADS 4
 #define THREAD_2_RUNS 2
-#define THREAD_3_RUNS 400000
+#define THREAD_3_RUNS 4
 
 int* BOARD[10];
 int RUNTIME = 160;
