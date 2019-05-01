@@ -137,11 +137,29 @@ int main()
     expected[i] = 0;
   }
 
+  // Error is that main thread is not being set to use priority
+
   // Set priority for main thread
+  pthread_t mainID = pthread_self();
+  struct sched_param mainParamst;
+  int mainPolicy = 0;
   struct sched_param mainParams;
-  mainParams.sched_priority = sched_get_priority_max(SCHED_FIFO) - 10;
+  pthread_getschedparam(pthread_self(), &mainPolicy, &mainParams);
+  mainParams.sched_priority = sched_get_priority_max(SCHED_FIFO) - 2;
   pthread_setschedparam(pthread_self(), SCHED_FIFO, &mainParams);
-  pthread_setschedprio(pthread_self(), sched_get_priority_max(SCHED_FIFO) - 2);
+  //pthread_setschedprio(pthread_self(), sched_get_priority_max(SCHED_FIFO) - 2);
+
+  int mainErr = pthread_getschedparam(pthread_self(), &mainPolicy, &mainParamst);
+  if (mainErr != 0)
+  {
+    cout << "Setting priority failed for main thread." << endl;
+    return 1;
+  }
+  if (mainPolicy != SCHED_FIFO)
+  {
+    cout << "Scheduling is not set to FIFO." << endl;
+  }
+  cout << "Main thread priority set to " << mainParamst.sched_priority << endl;
 
   // Set priorities for each thread
   pthread_t threads[NUM_THREADS];
@@ -150,6 +168,7 @@ int main()
   int err;
   int policy;
   int prio;
+  int inher;
   for (int i = 0; i < 4; ++i)
   {
     pthread_attr_init(&threadAttributes[i]);
@@ -163,19 +182,19 @@ int main()
       cout << "Thread " << i << " policy not set to FIFO" << endl;
     }
     pthread_attr_setschedpolicy(&threadAttributes[i], SCHED_FIFO);
-    pthread_attr_getschedpolicy(&threadAttributes[i], &policy);
-    if (policy == SCHED_FIFO)
+    threadParams[i].sched_priority = sched_get_priority_max(SCHED_FIFO) - 10*i - 3;
+    err = pthread_attr_setschedparam(&threadAttributes[i], &threadParams[i]);
+    pthread_attr_setinheritsched(&threadAttributes[i], PTHREAD_EXPLICIT_SCHED);
+    pthread_attr_getinheritsched(&threadAttributes[i], &inher);
+    if (inher != PTHREAD_EXPLICIT_SCHED)
     {
-      cout << "Properly set thread " << i << " to FIFO" << endl;
+      cout << "Failed to disable inheritance." << endl;
+      return 1;
     }
     else
     {
-      cout << "Thread " << i << " policy not set to FIFO" << endl;
+      cout << "Inheritance disabled." << endl;
     }
-    pthread_attr_getschedparam(&threadAttributes[i], &threadParams[i]);
-    threadParams[i].sched_priority = sched_get_priority_max(SCHED_FIFO) - 1*i - 3;
-    err = pthread_attr_setschedparam(&threadAttributes[i], &threadParams[i]);
-    pthread_attr_setinheritsched(&threadAttributes[i], PTHREAD_EXPLICIT_SCHED);
     if (err == EINVAL)
     {
       cout << "Invalid priority for a thread." << endl;
@@ -188,16 +207,16 @@ int main()
     }
     else
     {
+      pthread_attr_getschedparam(&threadAttributes[i], &threadParams[i]);
       prio = threadParams[i].sched_priority;
       cout << "Priority of thread " << i << " set to " << prio << endl;
-      pthread_attr_getschedparam(&threadAttributes[i], &threadParams[i]);
     }
   }
 
   // Set processor affinity
   cpu_set_t cpu[5];
   CPU_ZERO(&cpu[0]);
-  CPU_SET(3, &cpu[0]);
+  CPU_SET(0, &cpu[0]);
   pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpu[0]);
   for (int i = 0; i < 4; ++i)
   {
@@ -212,6 +231,21 @@ int main()
   pthread_create(&threads[2], &threadAttributes[2], threadHandler, (void *)(intptr_t)4);
   pthread_create(&threads[3], &threadAttributes[3], threadHandler, (void *)(intptr_t)16);
 
+  struct sched_param threadParamst;
+  int threadPolicy;
+  for (int i = 0; i < 4; ++i)
+  {
+    pthread_getschedparam(threads[i], &threadPolicy, &threadParamst);
+    if (threadPolicy == SCHED_FIFO)
+    {
+      cout << "Properly set thread " << i << " to FIFO" << endl;
+    }
+    else
+    {
+      cout << "Thread " << i << " policy not set to FIFO" << endl;
+    }
+    cout << "Thread priority set to " << threadParamst.sched_priority << endl;
+  }
   /*
   for (int i = 0; i < 4; ++i)
   {
@@ -233,7 +267,7 @@ int main()
   CPU_SET(3, &cpuClock);
 
   struct sched_param parameters;
-  parameters.sched_priority = sched_get_priority_max(SCHED_FIFO) - 12;
+  parameters.sched_priority = sched_get_priority_max(SCHED_FIFO) - 1;
   pthread_attr_setschedparam(&attributes, &parameters);
   pthread_attr_setinheritsched(&attributes, PTHREAD_EXPLICIT_SCHED);
   pthread_attr_setaffinity_np(&attributes, sizeof(cpu_set_t), &cpuClock);
@@ -265,7 +299,7 @@ int main()
 
   for (int i = 0; i < RUNTIME; ++i)
   {
-    cout << "Iteration " << i << endl;
+    //cout << "Iteration " << i << endl;
     sem_post(&wakeupSchedule[0]);
     pthread_mutex_lock(&lock[0]);
     if (counter[0] < expected[0])
@@ -307,9 +341,9 @@ int main()
       pthread_mutex_unlock(&lock[3]);
       expected[3] += 1;
     }
-    cout << "Waiting..." << endl;
+    //cout << "Waiting..." << endl;
     sem_wait(&schedule);
-    cout << "Wait complete." << endl;
+    //cout << "Wait complete." << endl;
   }
 
   for (int i = 0; i < 4; ++i)
