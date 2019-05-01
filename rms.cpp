@@ -139,8 +139,9 @@ int main()
 
   // Set priority for main thread
   struct sched_param mainParams;
-  //mainParams.sched_priority = sched_get_priority_max(SCHED_FIFO) - 2;
-  //pthread_setschedparam(pthread_self(), SCHED_FIFO, &mainParams);
+  mainParams.sched_priority = sched_get_priority_max(SCHED_FIFO) - 10;
+  pthread_setschedparam(pthread_self(), SCHED_FIFO, &mainParams);
+  pthread_setschedprio(pthread_self(), sched_get_priority_max(SCHED_FIFO) - 2);
 
   // Set priorities for each thread
   pthread_t threads[NUM_THREADS];
@@ -174,7 +175,7 @@ int main()
     pthread_attr_getschedparam(&threadAttributes[i], &threadParams[i]);
     threadParams[i].sched_priority = sched_get_priority_max(SCHED_FIFO) - 1*i - 3;
     err = pthread_attr_setschedparam(&threadAttributes[i], &threadParams[i]);
-    //pthread_attr_setinheritsched(&threadAttributes[i], PTHREAD_EXPLICIT_SCHED);
+    pthread_attr_setinheritsched(&threadAttributes[i], PTHREAD_EXPLICIT_SCHED);
     if (err == EINVAL)
     {
       cout << "Invalid priority for a thread." << endl;
@@ -194,13 +195,15 @@ int main()
   }
 
   // Set processor affinity
-  cpu_set_t cpu;
-  CPU_ZERO(&cpu);
-  CPU_SET(2, &cpu);
-  //pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpu);
+  cpu_set_t cpu[5];
+  CPU_ZERO(&cpu[0]);
+  CPU_SET(3, &cpu[0]);
+  pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpu[0]);
   for (int i = 0; i < 4; ++i)
   {
-    pthread_attr_setaffinity_np(&threadAttributes[i], sizeof(cpu_set_t), &cpu);
+    CPU_ZERO(&cpu[i+1]);
+    CPU_SET(3, &cpu[i+1]);
+    pthread_attr_setaffinity_np(&threadAttributes[i], sizeof(cpu_set_t), &cpu[i+1]);
   }
 
   // Initialize threads
@@ -209,15 +212,31 @@ int main()
   pthread_create(&threads[2], &threadAttributes[2], threadHandler, (void *)(intptr_t)4);
   pthread_create(&threads[3], &threadAttributes[3], threadHandler, (void *)(intptr_t)16);
 
+  /*
+  for (int i = 0; i < 4; ++i)
+  {
+    CPU_ZERO(&cpu[i+1]);
+    CPU_SET(3, &cpu[i+1]);
+    pthread_setschedparam(threads[i], SCHED_FIFO, &mainParams);
+    pthread_setschedprio(threads[i], sched_get_priority_max(SCHED_FIFO) - 5 + i);
+    pthread_setaffinity_np(threads[i], sizeof(cpu_set_t), &cpu[i+1]);
+  }
+  */
+
   // Initialize timer to call the given function on this thread each time it expires
 
   pthread_attr_t attributes;
   pthread_attr_init(&attributes);
 
+  cpu_set_t cpuClock;
+  CPU_ZERO(&cpuClock);
+  CPU_SET(3, &cpuClock);
+
   struct sched_param parameters;
-  parameters.sched_priority = sched_get_priority_max(SCHED_FIFO) - 1;
-  pthread_attr_setschedpolicy(&attributes, SCHED_FIFO);
+  parameters.sched_priority = sched_get_priority_max(SCHED_FIFO) - 12;
   pthread_attr_setschedparam(&attributes, &parameters);
+  pthread_attr_setinheritsched(&attributes, PTHREAD_EXPLICIT_SCHED);
+  pthread_attr_setaffinity_np(&attributes, sizeof(cpu_set_t), &cpuClock);
 
   struct sigevent sig;
   sig.sigev_notify = SIGEV_THREAD;
@@ -246,6 +265,7 @@ int main()
 
   for (int i = 0; i < RUNTIME; ++i)
   {
+    cout << "Iteration " << i << endl;
     sem_post(&wakeupSchedule[0]);
     pthread_mutex_lock(&lock[0]);
     if (counter[0] < expected[0])
@@ -287,7 +307,9 @@ int main()
       pthread_mutex_unlock(&lock[3]);
       expected[3] += 1;
     }
+    cout << "Waiting..." << endl;
     sem_wait(&schedule);
+    cout << "Wait complete." << endl;
   }
 
   for (int i = 0; i < 4; ++i)
