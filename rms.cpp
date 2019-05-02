@@ -243,7 +243,7 @@ int main()
 
   cpu_set_t cpuClock;
   CPU_ZERO(&cpuClock);
-  CPU_SET(3, &cpuClock);
+  CPU_SET(0, &cpuClock);
 
   struct sched_param parameters;
   parameters.sched_priority = sched_get_priority_max(SCHED_FIFO) - 1;
