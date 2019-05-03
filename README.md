@@ -10,8 +10,8 @@ CPU core and being checking if they meet the schedule or not.  Each thread does 
 
 ## Implementation
 
-Compile on the Linux Command Line with "g++ rms.cpp -pthread -lrt".  The program is implemented in C++ using pthreads and
-unix standard libraries.  The main thread becomes a "scheduler," which handles dispatching the threads by incrementing semaphores.
+Compile on the Linux Command Line with "g++ rms.cpp -pthread -lrt".  The program must be run with elevated permissions (i.e. sudo on Ubuntu) to set thread priorities properly.  The program is implemented in C++ using pthreads and unix standard libraries.  The main thread becomes a "scheduler," which handles dispatching the threads by incrementing semaphores.
+
 The scheduler itself is managed by a CPU timer, which also controls a semaphore for the scheduler.  The threads are also all assigned to a single core, the first core of the CPU.  The priorities of the threads are set by their period, in the following order:
 
 1. CPU Timer

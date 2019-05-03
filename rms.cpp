@@ -166,7 +166,7 @@ int main()
   }
   if (mainPolicy != SCHED_FIFO)
   {
-    cout << "Scheduling is not set to FIFO." << endl;
+    cout << "Scheduling of the main thread is not set to FIFO. Try running with superuser permissions." << endl;
     return 1;
   }
   if (mainParamst.sched_priority != sched_get_priority_max(SCHED_FIFO) - 2)
